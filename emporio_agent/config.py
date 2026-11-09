@@ -36,7 +36,7 @@ PROVIDERS = {
         default_model="gemini-3.5-flash-lite",
     ),
 }
-DEFAULT_PROVIDER = "groq"
+DEFAULT_PROVIDER = "gemini"
 
 
 def llm_settings() -> LLMSettings:
