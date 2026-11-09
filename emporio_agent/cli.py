@@ -18,6 +18,10 @@ def main() -> None:
     parser.add_argument("--show-tools", action="store_true", help="print each tool call")
     options = parser.parse_args()
 
+    # Windows defaults to a legacy code page when input or output is redirected.
+    sys.stdin.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
+
     load_dotenv(ROOT / ".env")
     try:
         agent = Agent(on_tool_call=_print_tool_call if options.show_tools else None)
