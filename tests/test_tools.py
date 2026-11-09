@@ -1,8 +1,11 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 
 from emporio_agent.policies import PolicyManual
 from emporio_agent.store import AVAILABLE, Store
+from emporio_agent.tickets import TicketLog
 from emporio_agent.tools import ORDER_NOT_VERIFIED, Tools
 
 
@@ -74,6 +77,7 @@ class SearchProductsTest(ToolsTestCase):
         result = self.tools.search_products(category="Cordas Orquestrais")
         self.assertEqual(result["total_found"], 0)
         self.assertIn("Do not claim", result["note"])
+        self.assertIn("Do not name specific products", result["note"])
 
 
 class PromotionsTest(ToolsTestCase):
@@ -116,6 +120,40 @@ class GetPolicyTest(ToolsTestCase):
         self.assertIn("hours", result["topics"])
 
 
+class OpenTicketTest(ToolsTestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.path = Path(folder.name) / "tickets.jsonl"
+        self.tools = Tools(self.store, PolicyManual(), TicketLog(self.path))
+
+    def records(self):
+        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+
+    def test_complaint_is_recorded_with_the_24_hour_deadline(self):
+        result = self.tools.open_ticket("complaint", "Braço rachado", "a@b.com", 8)
+        self.assertEqual(result["ticket_id"], "EM-00001")
+        self.assertIn("24 business hours", result["next_step"])
+        record = self.records()[0]
+        self.assertEqual(record["summary"], "Braço rachado")
+        self.assertEqual(record["order_id"], 8)
+
+    def test_return_request_promises_no_deadline(self):
+        result = self.tools.open_ticket("return_or_exchange", "Arrependimento", "a@b.com")
+        self.assertIn("do not promise", result["next_step"])
+
+    def test_ticket_numbers_increase(self):
+        self.tools.open_ticket("complaint", "um", "a@b.com")
+        result = self.tools.open_ticket("complaint", "dois", "a@b.com")
+        self.assertEqual(result["ticket_id"], "EM-00002")
+
+    def test_invalid_tickets_are_not_recorded(self):
+        for arguments in (("nope", "x", "a@b.com"), ("complaint", " ", "a@b.com"), ("complaint", "x", "")):
+            with self.subTest(arguments=arguments):
+                self.assertIn("error", self.tools.open_ticket(*arguments))
+        self.assertFalse(self.path.exists())
+
+
 class ExecuteTest(ToolsTestCase):
     def test_runs_a_tool_from_json_arguments(self):
         result = json.loads(self.tools.execute("get_policy", '{"topic": "hours"}'))
@@ -144,7 +182,10 @@ class ExecuteTest(ToolsTestCase):
 class SchemasTest(ToolsTestCase):
     def test_every_schema_has_a_handler(self):
         names = {s["function"]["name"] for s in self.tools.schemas()}
-        self.assertEqual(names, {"search_products", "list_promotions", "get_order", "get_policy"})
+        self.assertEqual(
+            names,
+            {"search_products", "list_promotions", "get_order", "get_policy", "open_ticket"},
+        )
 
     def test_category_enum_comes_from_the_data(self):
         schema = self.tools.schemas()[0]["function"]["parameters"]

@@ -6,6 +6,7 @@ from typing import Any
 from emporio_agent.policies import PolicyManual
 from emporio_agent.pricing import quote
 from emporio_agent.store import AVAILABLE, Order, Product, Store
+from emporio_agent.tickets import TicketLog
 
 MAX_RESULTS = 8
 MAX_ALTERNATIVES = 3
@@ -17,16 +18,28 @@ ORDER_NOT_VERIFIED = (
     "and the e-mail or phone number used in the purchase."
 )
 
+TICKET_NEXT_STEPS = {
+    "complaint": "Forwarded to the person responsible, who replies within 24 business hours.",
+    "return_or_exchange": (
+        "Forwarded to the store's team, who will contact the customer to continue. "
+        "No deadline is set for this contact, so do not promise one."
+    ),
+}
+
 
 class Tools:
-    def __init__(self, store: Store, manual: PolicyManual) -> None:
+    def __init__(
+        self, store: Store, manual: PolicyManual, tickets: TicketLog | None = None
+    ) -> None:
         self._store = store
         self._manual = manual
+        self._tickets = tickets or TicketLog()
         self._handlers = {
             "search_products": self.search_products,
             "list_promotions": self.list_promotions,
             "get_order": self.get_order,
             "get_policy": self.get_policy,
+            "open_ticket": self.open_ticket,
         }
 
     def schemas(self) -> list[dict[str, Any]]:
@@ -69,6 +82,24 @@ class Tools:
                 "customer service procedures, warranty or privacy.",
                 {"topic": {"type": "string", "enum": self._manual.topics}},
                 required=["topic"],
+            ),
+            _function(
+                "open_ticket",
+                "Hand a complaint or a return/exchange request over to the store's staff. "
+                "Call it only after the customer has given a contact and described the issue.",
+                {
+                    "kind": {"type": "string", "enum": list(TICKET_NEXT_STEPS)},
+                    "summary": {
+                        "type": "string",
+                        "description": "What happened and what the customer wants.",
+                    },
+                    "contact": {
+                        "type": "string",
+                        "description": "E-mail or phone number given by the customer.",
+                    },
+                    "order_id": {"type": "integer"},
+                },
+                required=["kind", "summary", "contact"],
             ),
         ]
 
@@ -122,7 +153,8 @@ class Tools:
         if not products:
             result["note"] = (
                 "Nothing found in the system. Do not claim that the store never sells this: "
-                "say it was not found right now and offer to help with something else."
+                "say it was not found right now and offer to help with something else. "
+                "Do not name specific products that a search has not returned."
             )
         return result
 
@@ -148,6 +180,16 @@ class Tools:
         if section is None:
             return {"error": f"Unknown topic '{topic}'.", "topics": self._manual.topics}
         return {"topic": topic, "content": section}
+
+    def open_ticket(
+        self, kind: str, summary: str, contact: str, order_id: int | None = None
+    ) -> dict[str, Any]:
+        if kind not in TICKET_NEXT_STEPS:
+            return {"error": f"Unknown kind '{kind}'.", "kinds": list(TICKET_NEXT_STEPS)}
+        if not str(summary).strip() or not str(contact).strip():
+            return {"error": "Ask the customer for the missing summary or contact first."}
+        ticket_id = self._tickets.open(kind, str(summary), str(contact), order_id)
+        return {"ticket_id": ticket_id, "next_step": TICKET_NEXT_STEPS[kind]}
 
     def _current_price(self, product: Product) -> Decimal:
         return quote(product.list_price, self._promotion_percent(product)).price
