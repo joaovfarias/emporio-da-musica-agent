@@ -1,8 +1,12 @@
 """Terminal interface for chatting with the agent."""
+from dotenv import load_dotenv
+
 from emporio_agent.agent import Agent
+from emporio_agent.config import ROOT
 
 
 def main() -> None:
+    load_dotenv(ROOT / ".env")
     agent = Agent()
     print("Empório da Música (type 'sair' to quit)")
     while True:

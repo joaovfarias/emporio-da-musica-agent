@@ -10,7 +10,7 @@ Prototype of a text-message agent for Empório da Música, a fictional musical i
 python -m venv .venv
 .venv\Scripts\activate        # Windows; on Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # then fill in the values
+cp .env.example .env          # then add a free API key (Groq or Google AI Studio)
 python -m emporio_agent
 ```
 
@@ -22,6 +22,7 @@ Tests: `python -m unittest`
 |---|---|
 | `emporio_agent/cli.py` | Terminal chat loop |
 | `emporio_agent/agent.py` | Conversation and tool-calling loop |
+| `emporio_agent/llm.py` | Client for the configured LLM provider |
 | `emporio_agent/prompts.py` | Persona and behaviour rules |
 | `emporio_agent/tools.py` | Tools exposed to the model |
 | `emporio_agent/store.py` | Loads and queries the store data |
