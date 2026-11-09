@@ -5,6 +5,7 @@ Usage: python scripts/record_conversations.py [conversation-file-stem ...]
 """
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -24,6 +25,7 @@ from emporio_agent.tickets import TicketLog  # noqa: E402
 from emporio_agent.tools import Tools  # noqa: E402
 
 OUTPUT_DIR = ROOT / "conversations"
+SECONDS_BETWEEN_TURNS = 15  # Stays within free-tier request limits.
 
 
 def sunday_morning() -> datetime:
@@ -112,6 +114,7 @@ def record(conversation: Conversation, tools: Tools, model: str) -> None:
         lines += [f"**Customer:** {message}", ""]
         reply = agent.reply(message)
         lines += [f"**Assistant:** {reply}", ""]
+        time.sleep(SECONDS_BETWEEN_TURNS)
     path = OUTPUT_DIR / f"{conversation.stem}.md"
     path.write_text("\n".join(lines), encoding="utf-8")
     print(f"wrote {path.name}", flush=True)
