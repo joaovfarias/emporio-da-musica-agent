@@ -179,10 +179,7 @@ class Tools:
         }
 
     def get_order(self, order_id: int | str, contact: str) -> dict[str, Any]:
-        try:
-            order = self._store.verified_order(int(order_id), str(contact))
-        except ValueError:
-            order = None
+        order = self._verified_order(order_id, contact)
         if order is None:
             return {"verified": False, "message": ORDER_NOT_VERIFIED}
         return {"verified": True, **self._describe_order(order)}
@@ -200,6 +197,8 @@ class Tools:
             return {"error": f"Unknown kind '{kind}'.", "kinds": list(TICKET_NEXT_STEPS)}
         if not str(summary).strip() or not str(contact).strip():
             return {"error": "Ask the customer for the missing summary or contact first."}
+        if kind == "return_or_exchange" and self._verified_order(order_id, contact) is None:
+            return {"error": ORDER_NOT_VERIFIED}
         ticket_id = self._tickets.open(kind, str(summary), str(contact), order_id)
         return {"ticket_id": ticket_id, "next_step": TICKET_NEXT_STEPS[kind]}
 
@@ -207,6 +206,12 @@ class Tools:
         if reason not in NO_LOOKUP_REASONS:
             return {"error": f"Unknown reason '{reason}'.", "reasons": list(NO_LOOKUP_REASONS)}
         return {"reason": reason, "instruction": "Write your reply to the customer now."}
+
+    def _verified_order(self, order_id: Any, contact: Any) -> Order | None:
+        try:
+            return self._store.verified_order(int(order_id), str(contact))
+        except (TypeError, ValueError):
+            return None
 
     def _current_price(self, product: Product) -> Decimal:
         return quote(product.list_price, self._promotion_percent(product)).price

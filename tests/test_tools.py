@@ -139,8 +139,16 @@ class OpenTicketTest(ToolsTestCase):
         self.assertEqual(record["order_id"], 8)
 
     def test_return_request_promises_no_deadline(self):
-        result = self.tools.open_ticket("return_or_exchange", "Arrependimento", "a@b.com")
+        owner = self.store.customers[self.store.orders[8].customer_id]
+        result = self.tools.open_ticket("return_or_exchange", "Arrependimento", owner.email, 8)
         self.assertIn("do not promise", result["next_step"])
+
+    def test_return_needs_a_verified_order(self):
+        for order_id in (8, None):
+            with self.subTest(order_id=order_id):
+                result = self.tools.open_ticket("return_or_exchange", "x", "a@b.com", order_id)
+                self.assertEqual(result["error"], ORDER_NOT_VERIFIED)
+        self.assertFalse(self.path.exists())
 
     def test_ticket_numbers_increase(self):
         self.tools.open_ticket("complaint", "um", "a@b.com")
