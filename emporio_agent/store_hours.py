@@ -16,6 +16,18 @@ OPENING_HOURS = {
 }
 
 
+# Indexed by datetime.weekday().
+_WEEKDAYS = (
+    "na segunda-feira",
+    "na terça-feira",
+    "na quarta-feira",
+    "na quinta-feira",
+    "na sexta-feira",
+    "no sábado",
+    "no domingo",
+)
+
+
 def store_now() -> datetime:
     return datetime.now(STORE_TIMEZONE)
 
@@ -36,6 +48,19 @@ def next_opening(moment: datetime) -> datetime:
         if opening > moment:
             return opening
     raise ValueError("OPENING_HOURS has no opening day")
+
+
+def closed_notice(moment: datetime) -> str | None:
+    """Customer-facing notice with the return time, required by section 7.1 of the manual."""
+    if is_open(moment):
+        return None
+    opening = next_opening(moment)
+    days_ahead = (opening.date() - moment.date()).days
+    day = {0: "hoje", 1: "amanhã"}.get(days_ahead, _WEEKDAYS[opening.weekday()])
+    return (
+        f"Estamos fora do horário de atendimento, e a equipe da loja volta {day} às "
+        f"{opening:%H:%M}. Enquanto isso, sigo te ajudando por aqui!"
+    )
 
 
 def describe_status(moment: datetime) -> str:

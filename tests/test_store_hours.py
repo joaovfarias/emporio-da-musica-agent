@@ -1,7 +1,13 @@
 import unittest
 from datetime import datetime
 
-from emporio_agent.store_hours import STORE_TIMEZONE, describe_status, is_open, next_opening
+from emporio_agent.store_hours import (
+    STORE_TIMEZONE,
+    closed_notice,
+    describe_status,
+    is_open,
+    next_opening,
+)
 
 
 def at(year, month, day, hour, minute=0):
@@ -41,6 +47,20 @@ class NextOpeningTest(unittest.TestCase):
 
     def test_saturday_afternoon_skips_sunday(self):
         self.assertEqual(next_opening(at(*SATURDAY, 14)), at(2026, 11, 16, 9))
+
+
+class ClosedNoticeTest(unittest.TestCase):
+    def test_no_notice_while_open(self):
+        self.assertIsNone(closed_notice(at(*MONDAY, 10)))
+
+    def test_before_opening_says_today(self):
+        self.assertIn("volta hoje às 09:00", closed_notice(at(*MONDAY, 7)))
+
+    def test_after_closing_says_tomorrow(self):
+        self.assertIn("volta amanhã às 09:00", closed_notice(at(*FRIDAY, 19)))
+
+    def test_saturday_afternoon_names_monday(self):
+        self.assertIn("volta na segunda-feira às 09:00", closed_notice(at(*SATURDAY, 14)))
 
 
 class DescribeStatusTest(unittest.TestCase):
