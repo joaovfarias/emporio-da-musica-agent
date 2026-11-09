@@ -107,6 +107,10 @@ Anything that must always hold lives in code, because the model can forget a pro
 | Telling the customer when the store reopens | `agent.py` (the prompt alone failed in testing) |
 | Tone, scope, what to ask the customer | `prompts.py` |
 
+### Interface
+
+A terminal chat. The brief's focus is the agent working correctly, so a CLI keeps the effort there, and `--show-tools` makes each decision visible. `Agent.reply(message)` knows nothing about the terminal, so an API or a WhatsApp webhook could call it directly.
+
 ### Conversation history
 
 History is kept in memory for the session and is lost on exit, which is enough for a terminal prototype. Only the text of finished turns is kept (last 20 messages). Tool results are dropped after each turn: they are large, they go stale, and removing them keeps requests within the free-tier limit. A production version would store sessions in a database, keyed by phone number.
@@ -121,6 +125,7 @@ A wrong contact and a non-existent order produce the same answer, so order numbe
 
 ## Assumptions
 
+- **Delivery and language:** the brief says to reply to the e-mail with the repository link, while the recruiter's e-mail asks for a PDF through Google Forms and for responses in English. I followed the e-mail, as the more recent and specific instruction, so this README is in English and the agent still talks to customers in Portuguese.
 - **Current date:** the real clock at UTC−4 decides whether the store is open. Holidays are not in the data, so they are treated as normal days.
 - **Withdrawal period:** the 7 days count from receipt, but the data only has an estimated delivery date and orders from 2025–2026. The agent asks the customer for the receipt date instead of concluding that every order has expired, and `open_ticket` refuses a return outside the window.
 - **Phone number:** the manual lists (67) 3341-4444 in section 1 and (67) 3321-4500 in section 7. The agent uses the first, the official company record.
@@ -151,4 +156,11 @@ I used **Claude Code** (Claude Opus 5.5) throughout, and it wrote most of the co
 
 I made the product decisions and steered the work: scope, free providers only, English for the code and Portuguese for the customer, the comparison of agent approaches before picking function calling, and the commit conventions. Claude Code analysed the data and the manual, found the inconsistencies listed above, implemented each step and tested it against the real providers. Live testing is what exposed several problems that were then fixed, such as an invented shipping fee, swapped PIX prices, a return ticket opened without verifying the order or the receipt date, a missing closed-store notice and a provider error on misspelled tool names.
 
-The commit history shows the real order of the work, one step per commit.
+The workflow was:
+
+1. **Plan before code.** Read the brief and the data with the assistant, discuss the options and decide the approach.
+2. **Build in small steps.** Data, pricing, policies, tools, then the agent loop, each with its tests and its own commit.
+3. **Test on real models and read the transcripts.** Unit tests could not catch what the model actually said, so every recording was checked against the data.
+4. **Fix failures in code when possible.** When a prompt rule failed, the rule moved into the tools or the loop instead of the prompt being reworded.
+
+The commit history shows the real order of the work.
