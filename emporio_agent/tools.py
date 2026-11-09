@@ -1,11 +1,14 @@
 """Tools the model can call."""
 import json
+from collections.abc import Callable
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from emporio_agent.policies import PolicyManual
-from emporio_agent.pricing import quote
+from emporio_agent.pricing import Quote, quote
 from emporio_agent.store import AVAILABLE, Order, Product, Store
+from emporio_agent.store_hours import store_now
 from emporio_agent.tickets import TicketLog
 
 MAX_RESULTS = 8
@@ -20,22 +23,30 @@ ORDER_NOT_VERIFIED = (
 
 NO_LOOKUP_REASONS = ("greeting", "out_of_scope", "asking_customer_for_details")
 
+WITHDRAWAL_DAYS = 7
+_STAFF_FOLLOW_UP = (
+    "Forwarded to the store's team, who will contact the customer to continue. "
+    "No deadline is set for this contact, so do not promise one."
+)
 TICKET_NEXT_STEPS = {
     "complaint": "Forwarded to the person responsible, who replies within 24 business hours.",
-    "return_or_exchange": (
-        "Forwarded to the store's team, who will contact the customer to continue. "
-        "No deadline is set for this contact, so do not promise one."
-    ),
+    "return": _STAFF_FOLLOW_UP,
+    "exchange": _STAFF_FOLLOW_UP,
 }
 
 
 class Tools:
     def __init__(
-        self, store: Store, manual: PolicyManual, tickets: TicketLog | None = None
+        self,
+        store: Store,
+        manual: PolicyManual,
+        tickets: TicketLog | None = None,
+        clock: Callable[[], datetime] = store_now,
     ) -> None:
         self._store = store
         self._manual = manual
         self._tickets = tickets or TicketLog()
+        self._clock = clock
         self._handlers = {
             "search_products": self.search_products,
             "list_promotions": self.list_promotions,
@@ -88,8 +99,9 @@ class Tools:
             ),
             _function(
                 "open_ticket",
-                "Hand a complaint or a return/exchange request over to the store's staff. "
-                "Call it only after the customer has given a contact and described the issue.",
+                "Hand a request over to the store's staff: a complaint, a return (the customer "
+                "regrets the purchase) or an exchange (defect or preference). Call it only "
+                "after the customer has given the required details.",
                 {
                     "kind": {"type": "string", "enum": list(TICKET_NEXT_STEPS)},
                     "summary": {
@@ -101,6 +113,11 @@ class Tools:
                         "description": "E-mail or phone number given by the customer.",
                     },
                     "order_id": {"type": "integer"},
+                    "received_date": {
+                        "type": "string",
+                        "description": "YYYY-MM-DD. The day the customer says the product "
+                        "arrived; required for returns and exchanges. Never guess it.",
+                    },
                 },
                 required=["kind", "summary", "contact"],
             ),
@@ -166,7 +183,8 @@ class Tools:
             result["note"] = (
                 "Nothing found in the system. Do not claim that the store never sells this: "
                 "say it was not found right now and offer to help with something else. "
-                "Do not name specific products that a search has not returned."
+                "Do not name specific products or claim there are similar options "
+                "that a search has not returned."
             )
         return result
 
@@ -191,16 +209,41 @@ class Tools:
         return {"topic": topic, "content": section}
 
     def open_ticket(
-        self, kind: str, summary: str, contact: str, order_id: int | None = None
+        self,
+        kind: str,
+        summary: str,
+        contact: str,
+        order_id: int | None = None,
+        received_date: str | None = None,
     ) -> dict[str, Any]:
         if kind not in TICKET_NEXT_STEPS:
             return {"error": f"Unknown kind '{kind}'.", "kinds": list(TICKET_NEXT_STEPS)}
         if not str(summary).strip() or not str(contact).strip():
             return {"error": "Ask the customer for the missing summary or contact first."}
-        if kind == "return_or_exchange" and self._verified_order(order_id, contact) is None:
-            return {"error": ORDER_NOT_VERIFIED}
-        ticket_id = self._tickets.open(kind, str(summary), str(contact), order_id)
+        if kind != "complaint":
+            problem = self._return_problem(kind, order_id, contact, received_date)
+            if problem:
+                return {"error": problem}
+        ticket_id = self._tickets.open(kind, str(summary), str(contact), order_id, received_date)
         return {"ticket_id": ticket_id, "next_step": TICKET_NEXT_STEPS[kind]}
+
+    def _return_problem(
+        self, kind: str, order_id: Any, contact: Any, received_date: Any
+    ) -> str | None:
+        if self._verified_order(order_id, contact) is None:
+            return ORDER_NOT_VERIFIED
+        received = _parse_date(received_date)
+        if received is None:
+            return "Ask the customer which day the product arrived. Do not assume it."
+        days_since = (self._clock().date() - received).days
+        if days_since < 0:
+            return "The received date is in the future. Ask the customer to confirm it."
+        if kind == "return" and days_since > WITHDRAWAL_DAYS:
+            return (
+                f"The product arrived {days_since} days ago, outside the {WITHDRAWAL_DAYS}-day "
+                "withdrawal period. Do not open a ticket; explain this to the customer."
+            )
+        return None
 
     def answer_without_lookup(self, reason: str) -> dict[str, Any]:
         if reason not in NO_LOOKUP_REASONS:
@@ -248,6 +291,7 @@ class Tools:
     def _describe_price(self, product: Product) -> dict[str, Any]:
         result = quote(product.list_price, self._promotion_percent(product))
         pricing: dict[str, Any] = {
+            "summary": _price_summary(result),
             "current_price": float(result.price),
             "max_interest_free_installments": result.max_installments,
             "installment_value": float(result.installment_value),
@@ -298,6 +342,32 @@ def _function(
             },
         },
     }
+
+
+def _brl(value: Decimal) -> str:
+    digits = f"{value:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+    return f"R$ {digits}"
+
+
+def _price_summary(result: Quote) -> str:
+    """Ready-made text: models sometimes mix up numbers when composing it themselves."""
+    if result.max_installments > 1:
+        terms = f"em até {result.max_installments}x de {_brl(result.installment_value)} sem juros"
+    else:
+        terms = "à vista"
+    if result.promotion_percent:
+        return (
+            f"De {_brl(result.list_price)} por {_brl(result.price)} "
+            f"({result.promotion_percent}% de desconto), {terms}. Sem desconto adicional no PIX."
+        )
+    return f"{_brl(result.price)} ({terms}), ou {_brl(result.pix_price)} no PIX."
+
+
+def _parse_date(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        return None
 
 
 def _parse_price(value: float | None) -> Decimal | None:

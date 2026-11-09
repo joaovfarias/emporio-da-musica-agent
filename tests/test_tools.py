@@ -1,10 +1,12 @@
 import json
 import tempfile
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 from emporio_agent.policies import PolicyManual
 from emporio_agent.store import AVAILABLE, Store
+from emporio_agent.store_hours import STORE_TIMEZONE
 from emporio_agent.tickets import TicketLog
 from emporio_agent.tools import ORDER_NOT_VERIFIED, Tools
 
@@ -23,6 +25,19 @@ class SearchProductsTest(ToolsTestCase):
         pricing = result["products"][0]["pricing"]
         self.assertEqual(pricing["current_price"], 2199.0)
         self.assertEqual(pricing["pix_price"], 2089.05)
+
+    def test_summary_spells_out_regular_price_terms(self):
+        pricing = self.tools.search_products(query="Takamine GD20")["products"][0]["pricing"]
+        self.assertEqual(
+            pricing["summary"],
+            "R$ 2.199,00 (em até 12x de R$ 183,25 sem juros), ou R$ 2.089,05 no PIX.",
+        )
+
+    def test_summary_spells_out_promotion_terms(self):
+        product = self.store.products[127]
+        pricing = self.tools.search_products(query=product.name)["products"][0]["pricing"]
+        self.assertIn("(10% de desconto)", pricing["summary"])
+        self.assertIn("Sem desconto adicional no PIX", pricing["summary"])
 
     def test_filters_available_products_by_category_and_price(self):
         result = self.tools.search_products(category="Violões", max_price=1000)
@@ -78,6 +93,7 @@ class SearchProductsTest(ToolsTestCase):
         self.assertEqual(result["total_found"], 0)
         self.assertIn("Do not claim", result["note"])
         self.assertIn("Do not name specific products", result["note"])
+        self.assertIn("similar options", result["note"])
 
 
 class PromotionsTest(ToolsTestCase):
@@ -125,7 +141,8 @@ class OpenTicketTest(ToolsTestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.path = Path(folder.name) / "tickets.jsonl"
-        self.tools = Tools(self.store, PolicyManual(), TicketLog(self.path))
+        monday = datetime(2026, 11, 9, 10, tzinfo=STORE_TIMEZONE)
+        self.tools = Tools(self.store, PolicyManual(), TicketLog(self.path), clock=lambda: monday)
 
     def records(self):
         return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
@@ -139,16 +156,34 @@ class OpenTicketTest(ToolsTestCase):
         self.assertEqual(record["order_id"], 8)
 
     def test_return_request_promises_no_deadline(self):
-        owner = self.store.customers[self.store.orders[8].customer_id]
-        result = self.tools.open_ticket("return_or_exchange", "Arrependimento", owner.email, 8)
+        result = self.open_return("2026-11-07")
         self.assertIn("do not promise", result["next_step"])
+        self.assertEqual(self.records()[0]["received_date"], "2026-11-07")
+
+    def open_return(self, received_date, kind="return"):
+        owner = self.store.customers[self.store.orders[8].customer_id]
+        return self.tools.open_ticket(kind, "x", owner.email, 8, received_date)
 
     def test_return_needs_a_verified_order(self):
         for order_id in (8, None):
             with self.subTest(order_id=order_id):
-                result = self.tools.open_ticket("return_or_exchange", "x", "a@b.com", order_id)
+                result = self.tools.open_ticket("return", "x", "a@b.com", order_id, "2026-11-07")
                 self.assertEqual(result["error"], ORDER_NOT_VERIFIED)
         self.assertFalse(self.path.exists())
+
+    def test_return_needs_a_valid_received_date(self):
+        for received_date in (None, "ontem", "2026-11-10"):
+            with self.subTest(received_date=received_date):
+                self.assertIn("error", self.open_return(received_date))
+        self.assertFalse(self.path.exists())
+
+    def test_withdrawal_window_is_seven_days(self):
+        self.assertIn("ticket_id", self.open_return("2026-11-02"))
+        late = self.open_return("2026-11-01")
+        self.assertIn("8 days ago", late["error"])
+
+    def test_exchange_is_not_limited_to_seven_days(self):
+        self.assertIn("ticket_id", self.open_return("2026-10-20", kind="exchange"))
 
     def test_ticket_numbers_increase(self):
         self.tools.open_ticket("complaint", "um", "a@b.com")

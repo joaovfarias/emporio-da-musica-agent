@@ -10,7 +10,14 @@ class TicketLog:
     def __init__(self, path: Path = TICKETS_FILE) -> None:
         self._path = path
 
-    def open(self, kind: str, summary: str, contact: str, order_id: int | None = None) -> str:
+    def open(
+        self,
+        kind: str,
+        summary: str,
+        contact: str,
+        order_id: int | None = None,
+        received_date: str | None = None,
+    ) -> str:
         ticket_id = f"EM-{self._count() + 1:05d}"
         record = {
             "id": ticket_id,
@@ -19,6 +26,7 @@ class TicketLog:
             "summary": summary,
             "contact": contact,
             "order_id": order_id,
+            "received_date": received_date,
         }
         with open(self._path, "a", encoding="utf-8") as file:
             file.write(json.dumps(record, ensure_ascii=False) + "\n")
