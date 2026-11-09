@@ -154,6 +154,12 @@ class OpenTicketTest(ToolsTestCase):
         self.assertFalse(self.path.exists())
 
 
+class AnswerWithoutLookupTest(ToolsTestCase):
+    def test_accepts_only_the_listed_reasons(self):
+        self.assertEqual(self.tools.answer_without_lookup("greeting")["reason"], "greeting")
+        self.assertIn("error", self.tools.answer_without_lookup("shipping"))
+
+
 class ExecuteTest(ToolsTestCase):
     def test_runs_a_tool_from_json_arguments(self):
         result = json.loads(self.tools.execute("get_policy", '{"topic": "hours"}'))
@@ -184,7 +190,14 @@ class SchemasTest(ToolsTestCase):
         names = {s["function"]["name"] for s in self.tools.schemas()}
         self.assertEqual(
             names,
-            {"search_products", "list_promotions", "get_order", "get_policy", "open_ticket"},
+            {
+                "search_products",
+                "list_promotions",
+                "get_order",
+                "get_policy",
+                "open_ticket",
+                "answer_without_lookup",
+            },
         )
 
     def test_category_enum_comes_from_the_data(self):

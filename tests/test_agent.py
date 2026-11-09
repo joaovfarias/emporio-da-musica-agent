@@ -78,6 +78,11 @@ class ToolLoopTest(AgentTestCase):
         self.assertEqual(agent.reply("oi"), "Oi!")
         self.assertEqual(len(client.requests), 1)
 
+    def test_first_round_requires_a_tool_and_later_rounds_do_not(self):
+        agent, client = self.agent(asks_for(call("1", "list_promotions")), FakeMessage("Ok."))
+        agent.reply("promoções?")
+        self.assertEqual([r["tool_choice"] for r in client.requests], ["required", "auto"])
+
     def test_tool_result_goes_back_to_the_model(self):
         agent, client = self.agent(
             asks_for(call("1", "get_policy", '{"topic": "hours"}')),

@@ -63,13 +63,14 @@ class Agent:
         self._remember(user_message, {"role": "assistant", "content": text})
         return text
 
-    def _complete(self, messages: list[Any]) -> Any:
+    def _complete(self, messages: list[Any], tool_choice: str) -> Any:
         for attempts_left in range(MAX_MALFORMED_CALL_RETRIES, -1, -1):
             try:
                 return self._client.chat.completions.create(
                     model=self._model,
                     messages=messages,
                     tools=self._tools.schemas(),
+                    tool_choice=tool_choice,
                     temperature=TEMPERATURE,
                 )
             except BadRequestError as error:
@@ -80,8 +81,11 @@ class Agent:
         raise AssertionError("unreachable")
 
     def _run_turn(self, messages: list[Any]) -> str | None:
-        for _ in range(MAX_TOOL_ROUNDS):
-            message = self._complete(messages).choices[0].message
+        for round_number in range(MAX_TOOL_ROUNDS):
+            # With "auto", the model sometimes invented facts or promised to check something
+            # and stopped. Forcing a first call makes it look up or say why it does not need to.
+            tool_choice = "required" if round_number == 0 else "auto"
+            message = self._complete(messages, tool_choice).choices[0].message
             if not message.tool_calls:
                 return (message.content or "").strip() or None
             # The raw message is sent back because Gemini attaches data to its tool calls

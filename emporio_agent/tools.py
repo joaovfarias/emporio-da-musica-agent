@@ -18,6 +18,8 @@ ORDER_NOT_VERIFIED = (
     "and the e-mail or phone number used in the purchase."
 )
 
+NO_LOOKUP_REASONS = ("greeting", "out_of_scope", "asking_customer_for_details")
+
 TICKET_NEXT_STEPS = {
     "complaint": "Forwarded to the person responsible, who replies within 24 business hours.",
     "return_or_exchange": (
@@ -40,6 +42,7 @@ class Tools:
             "get_order": self.get_order,
             "get_policy": self.get_policy,
             "open_ticket": self.open_ticket,
+            "answer_without_lookup": self.answer_without_lookup,
         }
 
     def schemas(self) -> list[dict[str, Any]]:
@@ -51,7 +54,7 @@ class Tools:
                 {
                     "query": {
                         "type": "string",
-                        "description": "Product name, brand or feature, e.g. 'Takamine GD20'.",
+                        "description": "Product name, brand or feature.",
                     },
                     "category": {"type": "string", "enum": categories},
                     "max_price": {
@@ -100,6 +103,15 @@ class Tools:
                     "order_id": {"type": "integer"},
                 },
                 required=["kind", "summary", "contact"],
+            ),
+            _function(
+                "answer_without_lookup",
+                "Declare that the reply needs no store facts: a greeting, an out-of-scope "
+                "request, or asking the customer for details you are missing. Never use it "
+                "for questions about products, prices, stock, promotions, orders, shipping, "
+                "payment, hours, address, returns or warranty; those need the other tools.",
+                {"reason": {"type": "string", "enum": list(NO_LOOKUP_REASONS)}},
+                required=["reason"],
             ),
         ]
 
@@ -190,6 +202,11 @@ class Tools:
             return {"error": "Ask the customer for the missing summary or contact first."}
         ticket_id = self._tickets.open(kind, str(summary), str(contact), order_id)
         return {"ticket_id": ticket_id, "next_step": TICKET_NEXT_STEPS[kind]}
+
+    def answer_without_lookup(self, reason: str) -> dict[str, Any]:
+        if reason not in NO_LOOKUP_REASONS:
+            return {"error": f"Unknown reason '{reason}'.", "reasons": list(NO_LOOKUP_REASONS)}
+        return {"reason": reason, "instruction": "Write your reply to the customer now."}
 
     def _current_price(self, product: Product) -> Decimal:
         return quote(product.list_price, self._promotion_percent(product)).price
